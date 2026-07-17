@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-EUserv 自动续期脚本 - 多账号多线程版本
-支持多账号配置、多线程并发处理、自动登录、验证码识别、检查到期状态、自动续期并发送 Telegram 通知
+EUserv 自动续期脚本 - 多账号多线程版本 (集成 2FA 两步验证防邮箱轰炸)
+支持多账号配置、多线程并发处理、自动登录、验证码识别、2FA动态密码、检查到期状态、自动续期并发送 Telegram 通知
 （附带：赛博自我续命机制，自动修改 GitHub Workflow Cron 并防止 60 天停用）
 """
 
@@ -14,7 +14,9 @@ import json
 import time
 import threading
 import logging
-import base64  # 新增：用于 GitHub API 提交编码
+import base64
+import hmac
+import struct
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,16 +47,32 @@ if SKIP_CONTRACTS:
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
-ocr = ddddocr.DdddOcr()
+ocr = ddddocr.DdddOcr(show_ad=False)
 ocr_lock = threading.Lock()
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36"
 
+# ============== 2FA 算法实现 ==============
+def _hotp(key: str, counter: int, digits: int = 6, digest: str = "sha1") -> str:
+    """HOTP 算法实现"""
+    key_bytes = base64.b32decode(key.upper() + "=" * ((8 - len(key)) % 8))
+    counter_bytes = struct.pack(">Q", counter)
+    mac = hmac.new(key_bytes, counter_bytes, digest).digest()
+    offset = mac[-1] & 0x0F
+    binary = struct.unpack(">L", mac[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(binary)[-digits:].zfill(digits)
+
+def _totp(key: str, time_step: int = 30, digits: int = 6, digest: str = "sha1") -> str:
+    """TOTP 算法实现 (生成 6 位动态验证码)"""
+    return _hotp(key, int(time.time() / time_step), digits, digest)
+# ==========================================
+
 # ============== 配置数据类 ==============
 class AccountConfig:
-    def __init__(self, email, password, imap_server='imap.gmail.com', email_password=''):
+    def __init__(self, email, password, euserv_2fa='', imap_server='imap.gmail.com', email_password=''):
         self.email = email
         self.password = password
+        self.euserv_2fa = euserv_2fa
         self.imap_server = imap_server
         self.email_password = email_password if email_password else password
 
@@ -86,9 +104,10 @@ _email = os.getenv("EUSERV_EMAIL", "")
 ACCOUNTS = [
     AccountConfig(
         email=_email,
-        password=os.getenv("EUSERV_PASSWORD"),
+        password=os.getenv("EUSERV_PASSWORD", ""),
+        euserv_2fa=os.getenv("EUSERV_2FA", ""),
         imap_server=get_imap_server(_email),
-        email_password=os.getenv("EMAIL_PASS")
+        email_password=os.getenv("EMAIL_PASS", "")
     ),
 ]
 
@@ -273,6 +292,7 @@ class EUserv:
                 logger.error("❌ 密码错误次数过多，账号被锁定，请5分钟后重试")
                 return False
             
+            # --- 1. 处理图片验证码 ---
             if 'captcha' in response.text.lower():
                 captcha_max_retries = 3
                 captcha_success = False
@@ -309,8 +329,27 @@ class EUserv:
                     logger.error(f"❌ 验证码连续 {captcha_max_retries} 次失败，放弃登录")
                     return False
             
-            if 'PIN that you receive via email' in response.text:
-                logger.info("⚠️ 需要 PIN 验证")
+            # --- 2. 处理 2FA 验证 (如果用户开启了 Authenticator) ---
+            if 'authenticator app' in response.text.lower() or 'enter the pin that is shown' in response.text.lower():
+                logger.info("⚠️ 检测到需要 2FA (Authenticator App) 验证")
+                if not self.config.euserv_2fa:
+                    logger.error("❌ 未配置 EUSERV_2FA Secret 环境变量，无法进行两步验证登录！")
+                    return False
+                
+                two_fa_code = _totp(self.config.euserv_2fa)
+                logger.info(f"🔑 已利用本地算法生成 2FA 动态密码: ****{two_fa_code[-2:]}")
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                hidden_inputs = soup.find_all("input", type="hidden")
+                two_fa_data = {inp["name"]: inp.get("value", "") for inp in hidden_inputs}
+                two_fa_data["pin"] = two_fa_code
+                
+                response = self.session.post(url, headers=headers, data=two_fa_data)
+                response.raise_for_status()
+                
+            # --- 3. 处理传统的邮箱 PIN 验证 (兼容没有开启2FA，或者强制邮件验证的账户) ---
+            elif 'PIN that you receive via email' in response.text:
+                logger.info("⚠️ 需要邮箱 PIN 验证 (登录阶段)")
                 pin_request_time = datetime.now()
                 time.sleep(3)
                 
@@ -323,7 +362,7 @@ class EUserv:
                 )
                 
                 if not pin:
-                    logger.error("❌ 获取 PIN 码失败")
+                    logger.error("❌ 邮箱获取 PIN 码失败")
                     return False
                 
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -337,6 +376,7 @@ class EUserv:
                 response = self.session.post(url, headers=headers, data=login_confirm_data)
                 response.raise_for_status()
 
+            # --- 4. 验证登录是否最终成功 ---
             success_checks = [
                 'Hello' in response.text,
                 'Confirm or change your customer data here' in response.text,
@@ -456,7 +496,7 @@ class EUserv:
             resp2.raise_for_status()
             logger.debug(f"[步骤2] 响应状态: {resp2.status_code}, 长度: {len(resp2.text)}")
             
-            logger.info("步骤3: 等待并获取续期 PIN 码...")
+            logger.info("步骤3: 等待并获取续期 PIN 码 (此步骤EUServ依然强制发邮件)...")
             time.sleep(5)
             pin = get_euserv_pin(
                 self.config.email,
@@ -700,7 +740,7 @@ def update_github_workflow_cron(target_date: datetime.date) -> Tuple[bool, str]:
 
 def main():
     logger.info("=" * 60)
-    logger.info("EUserv 多账号自动续期脚本（多线程版本 + GitHub Cron 动态修改）")
+    logger.info("EUserv 多账号自动续期脚本（多线程版本 + 2FA防轰炸 + GitHub Cron 动态修改）")
     logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"配置账号数: {len(ACCOUNTS)}")
     logger.info("=" * 60)
