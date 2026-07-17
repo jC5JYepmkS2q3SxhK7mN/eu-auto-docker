@@ -26,6 +26,7 @@ jobs:
         env:
           EUSERV_EMAIL: ${{ secrets.EUSERV_EMAIL }}
           EUSERV_PASSWORD: ${{ secrets.EUSERV_PASSWORD }}
+          EUSERV_2FA: ${{ secrets.EUSERV_2FA }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
