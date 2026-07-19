@@ -773,7 +773,7 @@ def main():
     logger.info("处理结果汇总")
     logger.info("=" * 60)
     
-    message_parts = [f"<b>🔄 EUserv github 多账号续期报告</b>\n"]
+    message_parts = [f"<b>🔄 eu-auto-docker github 多账号续期报告</b>\n"]
     message_parts.append(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     message_parts.append(f"处理账号数: {len(all_results)}\n")
     
