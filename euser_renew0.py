@@ -740,7 +740,7 @@ def update_github_workflow_cron(target_date: datetime.date) -> Tuple[bool, str]:
 
 def main():
     logger.info("=" * 60)
-    logger.info("eu-auto-docker多账号自动续期脚本（多线程版本 + 2FA防轰炸 + GitHub Cron 动态修改）")
+    logger.info("EUserv 多账号自动续期脚本（多线程版本 + 2FA防轰炸 + GitHub Cron 动态修改）")
     logger.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"配置账号数: {len(ACCOUNTS)}")
     logger.info("=" * 60)
