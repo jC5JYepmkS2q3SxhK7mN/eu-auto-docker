@@ -2,7 +2,7 @@ name: EUserv 续期
 
 on:
   schedule:
-    - cron: '0 0 16 8 *'  # 这里的日期会被 Python 脚本自动修改
+    - cron: '27 0 17 8 *'  # 这里的日期会被 Python 脚本自动修改
   workflow_dispatch:  # 允许手动触发工作流
 
 jobs:
