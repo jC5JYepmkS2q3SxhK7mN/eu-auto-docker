@@ -712,7 +712,7 @@ def update_github_workflow_cron(target_date: datetime.date) -> Tuple[bool, str]:
         content = base64.b64decode(data['content']).decode('utf-8')
 
         # 2. 生成新的 cron 表达式 (UTC 0点，对应北京时间早8点)
-        cron_expr = f"0 0 {target_date.day} {target_date.month} *"
+        cron_expr = f"27 0 {target_date.day} {target_date.month} *"
         
         # 3. 精准替换文件中的 cron 内容
         new_content = re.sub(r"cron:\s*'.*?'", f"cron: '{cron_expr}'", content, count=1)
