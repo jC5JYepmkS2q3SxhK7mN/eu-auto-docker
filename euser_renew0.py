@@ -496,7 +496,7 @@ def update_github_workflow_cron(target_date: datetime.date) -> Tuple[bool, str]:
         logger.warning("⚠️ 未配置 PAT_WITH_WORKFLOW_SCOPE 或 GITHUB_REPO，无法自动修改 Cron。")
         return False, "未配置 GitHub API 密钥"
 
-    file_path = ".github/workflows/euserv续期.yml"
+    file_path = ".github/workflows/euserv-run.yml"
     api_url = f"https://api.github.com/repos/{repo}/contents/{file_path}"
     headers = {
         "Authorization": f"token {token}",
